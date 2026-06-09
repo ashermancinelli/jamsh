@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -8,6 +9,8 @@ import pytest
 
 from jamsh import run
 from jamsh import run_live
+from jamsh import run_many_live
+from jamsh import run_many_live_async
 
 
 def test_run_list_command_captures_and_streams(capsys: pytest.CaptureFixture[str]) -> None:
@@ -127,3 +130,84 @@ def test_run_live_rejects_env_and_extra_env_together() -> None:
             env={},
             extra_env={},
         )
+
+
+def test_run_many_live_returns_results_in_input_order() -> None:
+    results = run_many_live(
+        [
+            [
+                sys.executable,
+                "-c",
+                "import time; time.sleep(0.1); print('first')",
+            ],
+            [sys.executable, "-c", "print('second')"],
+        ],
+        max_parallel=2,
+        echo=False,
+        max_lines=10,
+    )
+
+    assert [result.returncode for result in results] == [0, 0]
+    assert [result.stdout for result in results] == ["first\n", "second\n"]
+
+
+def test_run_many_live_failure_raises_first_failed_command() -> None:
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        run_many_live(
+            [
+                [sys.executable, "-c", "print('ok')"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('bad'); print('warn', file=sys.stderr); raise SystemExit(5)",
+                ],
+            ],
+            max_parallel=2,
+            echo=False,
+            max_lines=10,
+        )
+
+    exc = exc_info.value
+    assert exc.returncode == 5
+    assert exc.cmd == [
+        sys.executable,
+        "-c",
+        "import sys; print('bad'); print('warn', file=sys.stderr); raise SystemExit(5)",
+    ]
+    assert exc.output == "bad\n"
+    assert exc.stderr == "warn\n"
+
+
+def test_run_many_live_check_false_returns_failures() -> None:
+    results = run_many_live(
+        [[sys.executable, "-c", "raise SystemExit(3)"]],
+        check=False,
+        echo=False,
+    )
+
+    assert results[0].returncode == 3
+
+
+def test_run_many_live_rejects_env_and_extra_env_together() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        run_many_live(
+            [[sys.executable, "-c", "print('x')"]],
+            env={},
+            extra_env={},
+        )
+
+
+def test_run_many_live_rejects_invalid_parallelism() -> None:
+    with pytest.raises(ValueError, match="max_parallel"):
+        run_many_live([[sys.executable, "-c", "print('x')"]], max_parallel=0)
+
+
+def test_run_many_live_async_returns_results() -> None:
+    results = asyncio.run(
+        run_many_live_async(
+            [[sys.executable, "-c", "print('async')"]],
+            echo=False,
+        )
+    )
+
+    assert results[0].stdout == "async\n"

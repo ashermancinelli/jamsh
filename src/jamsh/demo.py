@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import sys
 
-from .subprocess_utils import run_live
 from .subprocess_utils import run
+from .subprocess_utils import run_live
+from .subprocess_utils import run_many_live
 
 
 def main() -> None:
@@ -36,9 +37,34 @@ def main() -> None:
     print("\n4. rich live window")
     run_live(
         ["bash", "-c", "for i in `seq 1 15`; do echo $i; sleep 0.2; done"],
-        message="Running live demo",
+        echo=False,
         max_window_height=10,
         max_lines=20,
+    )
+
+    print("\n5. rich parallel live window")
+    run_many_live(
+        [
+            [
+                sys.executable,
+                "-c",
+                "import time\nfor i in range(8):\n print(f'alpha {i}', flush=True)\n time.sleep(0.15)",
+            ],
+            [
+                sys.executable,
+                "-c",
+                "import sys, time\nfor i in range(8):\n print(f'beta {i}', file=sys.stderr, flush=True)\n time.sleep(0.2)",
+            ],
+            [
+                sys.executable,
+                "-c",
+                "import time\nfor i in range(8):\n print(f'gamma {i}', flush=True)\n time.sleep(0.1)",
+            ],
+        ],
+        max_parallel=3,
+        echo=False,
+        max_window_height=10,
+        max_lines=40,
     )
 
 

@@ -1,12 +1,33 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterable
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
+
+
+Command = list[str] | str
+
+
+@dataclass
+class _LiveCommandState:
+    index: int
+    cmd: Command
+    display_cmd: str
+    recent_stdout: deque[str]
+    recent_stderr: deque[str]
+    returncode: int | None = None
 
 
 class LiveProcessError(subprocess.CalledProcessError):
@@ -15,9 +36,9 @@ class LiveProcessError(subprocess.CalledProcessError):
         sections: list[str] = []
 
         if self.output:
-            sections.append(f"stdout:\n{self.output.rstrip()}" )
+            sections.append(f"stdout:\n{self.output.rstrip()}")
         if self.stderr:
-            sections.append(f"stderr:\n{self.stderr.rstrip()}" )
+            sections.append(f"stderr:\n{self.stderr.rstrip()}")
 
         if not sections:
             return base
@@ -38,20 +59,15 @@ def _build_env(
     return env
 
 
-def _echo_command(cmd: list[str] | str, echo: bool, echo_prefix: str) -> None:
+def _echo_command(cmd: Command, echo: bool, echo_prefix: str) -> None:
     if not echo:
         return
 
     display_cmd = _display_cmd(cmd)
-    try:
-        from rich.console import Console
-
-        Console(stderr=True).print(f"{echo_prefix}{display_cmd}", style="dim italic")
-    except ImportError:
-        print(f"{echo_prefix}{display_cmd}", file=sys.stderr)
+    Console(stderr=True).print(f"{echo_prefix}{display_cmd}", style="dim italic")
 
 
-def _display_cmd(cmd: list[str] | str) -> str:
+def _display_cmd(cmd: Command) -> str:
     return shlex.join(cmd) if isinstance(cmd, list) else cmd
 
 
@@ -67,7 +83,7 @@ def _stream_lines(stream, target, chunks: list[str] | None) -> None:
 
 
 def run(
-    cmd: list[str] | str,
+    cmd: Command,
     *,
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
@@ -132,7 +148,7 @@ def run(
 
 
 def run_live(
-    cmd: list[str] | str,
+    cmd: Command,
     *,
     message: str | None = None,
     cwd: Path | str | None = None,
@@ -147,15 +163,6 @@ def run_live(
     popen_env = _build_env(env, extra_env)
     if message is None:
         message = _display_cmd(cmd)
-
-    from rich.console import Group
-    from rich.live import Live
-    from rich.panel import Panel
-    from rich.progress import BarColumn
-    from rich.progress import Progress
-    from rich.progress import SpinnerColumn
-    from rich.progress import TextColumn
-    from rich.text import Text
 
     _echo_command(cmd, echo, echo_prefix)
 
@@ -174,7 +181,7 @@ def run_live(
     recent_stderr: deque[str] = deque(maxlen=max_lines)
     recent_lines: deque[tuple[str, str]] = deque(maxlen=max_lines)
 
-    def render() -> Group:
+    def render() -> Panel:
         log_text = Text()
         visible_lines = list(recent_lines)[-(max_window_height - 2) :]
         for stream_name, line in visible_lines:
@@ -184,11 +191,11 @@ def run_live(
 
         panel = Panel(
             log_text,
-            title="Process Output",
+            title=message,
             height=max_window_height,
             border_style="dim",
         )
-        return Group(panel, progress)
+        return panel
 
     def stream_to_window(stream, stream_name: str, chunks: deque[str]) -> None:
         try:
@@ -198,14 +205,6 @@ def run_live(
                 live.update(render())
         finally:
             stream.close()
-
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("{task.description}"),
-        BarColumn(bar_width=None),
-        transient=True,
-    )
-    task_id = progress.add_task(message, total=None)
 
     with Live(render(), refresh_per_second=10, transient=True) as live:
         stdout_thread = Thread(
@@ -226,7 +225,6 @@ def run_live(
 
         stdout_thread.join()
         stderr_thread.join()
-        progress.update(task_id, completed=1)
         live.update(render())
 
     completed = subprocess.CompletedProcess(
@@ -245,3 +243,186 @@ def run_live(
         )
 
     return completed
+
+
+async def run_many_live_async(
+    commands: Iterable[Command],
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    max_parallel: int | None = None,
+    max_window_height: int = 12,
+    max_lines: int = 200,
+    check: bool = True,
+    echo: bool = True,
+    echo_prefix: str = "$ ",
+) -> list[subprocess.CompletedProcess]:
+    popen_env = _build_env(env, extra_env)
+    command_list = list(commands)
+
+    if max_parallel is not None and max_parallel < 1:
+        raise ValueError("max_parallel must be at least 1")
+    if max_window_height < 3:
+        raise ValueError("max_window_height must be at least 3")
+    if not command_list:
+        return []
+
+    for cmd in command_list:
+        _echo_command(cmd, echo, echo_prefix)
+
+    parallelism = len(command_list) if max_parallel is None else max_parallel
+    semaphore = asyncio.Semaphore(parallelism)
+    recent_lines: deque[tuple[int, str, str]] = deque(maxlen=max_lines)
+    states = [
+        _LiveCommandState(
+            index=index,
+            cmd=cmd,
+            display_cmd=_display_cmd(cmd),
+            recent_stdout=deque(maxlen=max_lines),
+            recent_stderr=deque(maxlen=max_lines),
+        )
+        for index, cmd in enumerate(command_list)
+    ]
+    latest_index: int | None = None
+
+    def render() -> Panel:
+        completed_count = sum(state.returncode is not None for state in states)
+        title = f"{completed_count}/{len(states)} done"
+        if latest_index is not None:
+            title = f"{title} | {states[latest_index].display_cmd}"
+
+        log_text = Text()
+        visible_lines = list(recent_lines)[-(max_window_height - 2) :]
+        for index, stream_name, line in visible_lines:
+            prefix_style = "red dim" if stream_name == "stderr" else "cyan dim"
+            line_style = "red" if stream_name == "stderr" else "default"
+            log_text.append(f"[{index + 1}] ", style=prefix_style)
+            log_text.append(line.rstrip("\n"), style=line_style)
+            log_text.append("\n")
+
+        return Panel(
+            log_text,
+            title=title,
+            height=max_window_height,
+            border_style="dim",
+        )
+
+    async def read_stream(
+        state: _LiveCommandState,
+        stream: asyncio.StreamReader | None,
+        stream_name: str,
+        live: Live,
+    ) -> None:
+        nonlocal latest_index
+
+        if stream is None:
+            return
+
+        chunks = state.recent_stderr if stream_name == "stderr" else state.recent_stdout
+        while line_bytes := await stream.readline():
+            line = line_bytes.decode(errors="replace")
+            chunks.append(line)
+            recent_lines.append((state.index, stream_name, line))
+            latest_index = state.index
+            live.update(render())
+
+    async def run_command(state: _LiveCommandState, live: Live) -> None:
+        nonlocal latest_index
+
+        async with semaphore:
+            latest_index = state.index
+            live.update(render())
+
+            if isinstance(state.cmd, str):
+                process = await asyncio.create_subprocess_shell(
+                    state.cmd,
+                    cwd=cwd,
+                    env=popen_env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *state.cmd,
+                    cwd=cwd,
+                    env=popen_env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+
+            stdout_task = asyncio.create_task(
+                read_stream(state, process.stdout, "stdout", live)
+            )
+            stderr_task = asyncio.create_task(
+                read_stream(state, process.stderr, "stderr", live)
+            )
+
+            state.returncode = await process.wait()
+            await asyncio.gather(stdout_task, stderr_task)
+            latest_index = state.index
+            live.update(render())
+
+    with Live(render(), refresh_per_second=10, transient=True) as live:
+        await asyncio.gather(*(run_command(state, live) for state in states))
+        live.update(render())
+
+    completed_processes: list[subprocess.CompletedProcess] = []
+    for state in states:
+        if state.returncode is None:
+            raise RuntimeError(f"Command did not finish: {state.display_cmd}")
+
+        completed_processes.append(
+            subprocess.CompletedProcess(
+                args=state.cmd,
+                returncode=state.returncode,
+                stdout="".join(state.recent_stdout),
+                stderr="".join(state.recent_stderr),
+            )
+        )
+
+    if check:
+        for completed in completed_processes:
+            if completed.returncode != 0:
+                raise LiveProcessError(
+                    completed.returncode,
+                    completed.args,
+                    output=completed.stdout,
+                    stderr=completed.stderr,
+                )
+
+    return completed_processes
+
+
+def run_many_live(
+    commands: Iterable[Command],
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    max_parallel: int | None = None,
+    max_window_height: int = 12,
+    max_lines: int = 200,
+    check: bool = True,
+    echo: bool = True,
+    echo_prefix: str = "$ ",
+) -> list[subprocess.CompletedProcess]:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            run_many_live_async(
+                commands,
+                cwd=cwd,
+                env=env,
+                extra_env=extra_env,
+                max_parallel=max_parallel,
+                max_window_height=max_window_height,
+                max_lines=max_lines,
+                check=check,
+                echo=echo,
+                echo_prefix=echo_prefix,
+            )
+        )
+
+    raise RuntimeError("run_many_live cannot be called from a running event loop")

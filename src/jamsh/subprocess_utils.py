@@ -71,6 +71,15 @@ def _display_cmd(cmd: Command) -> str:
     return shlex.join(cmd) if isinstance(cmd, list) else cmd
 
 
+def _dump_completed_output(completed: subprocess.CompletedProcess) -> None:
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+        sys.stdout.flush()
+    if completed.stderr:
+        sys.stderr.write(completed.stderr)
+        sys.stderr.flush()
+
+
 def _stream_lines(stream, target, chunks: list[str] | None) -> None:
     try:
         for line in stream:
@@ -235,6 +244,7 @@ def run_live(
     )
 
     if check and returncode != 0:
+        _dump_completed_output(completed)
         raise LiveProcessError(
             returncode,
             cmd,
@@ -384,6 +394,7 @@ async def run_many_live_async(
     if check:
         for completed in completed_processes:
             if completed.returncode != 0:
+                _dump_completed_output(completed)
                 raise LiveProcessError(
                     completed.returncode,
                     completed.args,

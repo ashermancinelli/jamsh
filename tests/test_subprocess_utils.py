@@ -102,7 +102,9 @@ def test_run_live_returns_recent_output_on_success() -> None:
     assert result.stderr == "err\n"
 
 
-def test_run_live_failure_returns_recent_lines_in_exception() -> None:
+def test_run_live_failure_returns_recent_lines_in_exception(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
         run_live(
             [
@@ -121,6 +123,10 @@ def test_run_live_failure_returns_recent_lines_in_exception() -> None:
     assert "Recent command output" in str(exc)
     assert "stdout:" in str(exc)
     assert "stderr:" in str(exc)
+    captured = capsys.readouterr()
+    assert "one\n" in captured.out
+    assert "two\n" in captured.out
+    assert "warn\n" in captured.err
 
 
 def test_run_live_rejects_env_and_extra_env_together() -> None:
@@ -151,7 +157,9 @@ def test_run_many_live_returns_results_in_input_order() -> None:
     assert [result.stdout for result in results] == ["first\n", "second\n"]
 
 
-def test_run_many_live_failure_raises_first_failed_command() -> None:
+def test_run_many_live_failure_raises_first_failed_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
         run_many_live(
             [
@@ -176,6 +184,9 @@ def test_run_many_live_failure_raises_first_failed_command() -> None:
     ]
     assert exc.output == "bad\n"
     assert exc.stderr == "warn\n"
+    captured = capsys.readouterr()
+    assert "bad\n" in captured.out
+    assert "warn\n" in captured.err
 
 
 def test_run_many_live_check_false_returns_failures() -> None:

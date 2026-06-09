@@ -91,7 +91,6 @@ def test_run_live_returns_recent_output_on_success() -> None:
             "-c",
             "import sys; print('out'); print('err', file=sys.stderr)",
         ],
-        message="Running demo",
         echo=False,
         max_lines=10,
     )
@@ -108,7 +107,6 @@ def test_run_live_failure_returns_recent_lines_in_exception() -> None:
                 "-c",
                 "import sys; print('one'); print('two'); print('warn', file=sys.stderr); raise SystemExit(9)",
             ],
-            message="Failing command",
             echo=False,
             max_lines=2,
         )
@@ -123,7 +121,6 @@ def test_run_live_rejects_env_and_extra_env_together() -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
         run_live(
             [sys.executable, "-c", "print('x')"],
-            message="bad env",
             env={},
             extra_env={},
         )

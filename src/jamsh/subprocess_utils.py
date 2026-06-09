@@ -26,13 +26,17 @@ def _echo_command(cmd: list[str] | str, echo: bool, echo_prefix: str) -> None:
     if not echo:
         return
 
-    display_cmd = shlex.join(cmd) if isinstance(cmd, list) else cmd
+    display_cmd = _display_cmd(cmd)
     try:
         from rich.console import Console
 
         Console(stderr=True).print(f"{echo_prefix}{display_cmd}", style="dim italic")
     except ImportError:
         print(f"{echo_prefix}{display_cmd}", file=sys.stderr)
+
+
+def _display_cmd(cmd: list[str] | str) -> str:
+    return shlex.join(cmd) if isinstance(cmd, list) else cmd
 
 
 def _stream_lines(stream, target, chunks: list[str] | None) -> None:
@@ -114,7 +118,7 @@ def run(
 def run_live(
     cmd: list[str] | str,
     *,
-    message: str,
+    message: str | None = None,
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
     extra_env: dict[str, str] | None = None,
@@ -125,6 +129,8 @@ def run_live(
     echo_prefix: str = "$ ",
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
+    if message is None:
+        message = _display_cmd(cmd)
 
     from rich.console import Group
     from rich.live import Live

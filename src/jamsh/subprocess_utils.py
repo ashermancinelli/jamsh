@@ -9,6 +9,22 @@ from pathlib import Path
 from threading import Thread
 
 
+class LiveProcessError(subprocess.CalledProcessError):
+    def __str__(self) -> str:
+        base = super().__str__()
+        sections: list[str] = []
+
+        if self.output:
+            sections.append(f"stdout:\n{self.output.rstrip()}" )
+        if self.stderr:
+            sections.append(f"stderr:\n{self.stderr.rstrip()}" )
+
+        if not sections:
+            return base
+
+        return f"{base}\n\nRecent command output\n{'-' * 21}\n" + "\n\n".join(sections)
+
+
 def _build_env(
     env: dict[str, str] | None,
     extra_env: dict[str, str] | None,
@@ -105,7 +121,7 @@ def run(
     )
 
     if check and returncode != 0:
-        raise subprocess.CalledProcessError(
+        raise LiveProcessError(
             returncode,
             cmd,
             output=completed.stdout,
@@ -221,7 +237,7 @@ def run_live(
     )
 
     if check and returncode != 0:
-        raise subprocess.CalledProcessError(
+        raise LiveProcessError(
             returncode,
             cmd,
             output=completed.stdout,

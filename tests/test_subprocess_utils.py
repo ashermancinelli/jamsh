@@ -115,6 +115,9 @@ def test_run_live_failure_returns_recent_lines_in_exception() -> None:
     assert exc.returncode == 9
     assert exc.output == "one\ntwo\n"
     assert exc.stderr == "warn\n"
+    assert "Recent command output" in str(exc)
+    assert "stdout:" in str(exc)
+    assert "stderr:" in str(exc)
 
 
 def test_run_live_rejects_env_and_extra_env_together() -> None:

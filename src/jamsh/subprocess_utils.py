@@ -160,7 +160,8 @@ def run_live(
 
     def render() -> Group:
         log_text = Text()
-        for stream_name, line in recent_lines:
+        visible_lines = list(recent_lines)[-(max_window_height - 2) :]
+        for stream_name, line in visible_lines:
             style = "red" if stream_name == "stderr" else "default"
             log_text.append(line.rstrip("\n"), style=style)
             log_text.append("\n")

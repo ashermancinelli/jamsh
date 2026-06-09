@@ -35,18 +35,7 @@ def main() -> None:
 
     print("\n4. rich live window")
     run_live(
-        [
-            sys.executable,
-            "-c",
-            "import sys, time; "
-            "print('step 1'); "
-            "time.sleep(1); "
-            "print('step 2'); "
-            "time.sleep(1); "
-            "print('note: still working', file=sys.stderr); "
-            "time.sleep(1); "
-            "print('step 3')",
-        ],
+        ["bash", "-c", "for i in `seq 1 15`; do echo $i; sleep 0.2; done"],
         message="Running live demo",
         max_window_height=10,
         max_lines=20,

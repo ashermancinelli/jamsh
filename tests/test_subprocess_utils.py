@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from jamsh import run
+from jamsh import run_live
 
 
 def test_run_list_command_captures_and_streams(capsys: pytest.CaptureFixture[str]) -> None:
@@ -81,3 +82,48 @@ def test_run_without_capture_returns_none_streams() -> None:
 
     assert result.stdout is None
     assert result.stderr is None
+
+
+def test_run_live_returns_recent_output_on_success() -> None:
+    result = run_live(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err', file=sys.stderr)",
+        ],
+        message="Running demo",
+        echo=False,
+        max_lines=10,
+    )
+
+    assert result.stdout == "out\n"
+    assert result.stderr == "err\n"
+
+
+def test_run_live_failure_returns_recent_lines_in_exception() -> None:
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        run_live(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('one'); print('two'); print('warn', file=sys.stderr); raise SystemExit(9)",
+            ],
+            message="Failing command",
+            echo=False,
+            max_lines=2,
+        )
+
+    exc = exc_info.value
+    assert exc.returncode == 9
+    assert exc.output == "one\ntwo\n"
+    assert exc.stderr == "warn\n"
+
+
+def test_run_live_rejects_env_and_extra_env_together() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        run_live(
+            [sys.executable, "-c", "print('x')"],
+            message="bad env",
+            env={},
+            extra_env={},
+        )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 
+from .subprocess_utils import run_live
 from .subprocess_utils import run
 
 
@@ -13,7 +14,7 @@ def main() -> None:
         [
             sys.executable,
             "-c",
-            "import time; print('hello from child'); time.sleep(0.1); print('done')",
+            "import time; print('hello from child'); time.sleep(1); print('done')",
         ]
     )
 
@@ -22,7 +23,7 @@ def main() -> None:
         [
             sys.executable,
             "-c",
-            "import sys, time; print('stdout: start'); time.sleep(0.1); print('stderr: warning', file=sys.stderr); time.sleep(0.1); print('stdout: end')",
+            "import sys, time; print('stdout: start'); time.sleep(1); print('stderr: warning', file=sys.stderr); time.sleep(1); print('stdout: end')",
         ]
     )
 
@@ -30,6 +31,25 @@ def main() -> None:
     run(
         [sys.executable, "-c", "import os; print(f\"DEMO_FLAG={os.environ['DEMO_FLAG']}\")"],
         extra_env={"DEMO_FLAG": "enabled"},
+    )
+
+    print("\n4. rich live window")
+    run_live(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; "
+            "print('step 1'); "
+            "time.sleep(1); "
+            "print('step 2'); "
+            "time.sleep(1); "
+            "print('note: still working', file=sys.stderr); "
+            "time.sleep(1); "
+            "print('step 3')",
+        ],
+        message="Running live demo",
+        max_window_height=10,
+        max_lines=20,
     )
 
 

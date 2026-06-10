@@ -83,28 +83,45 @@ def _echo_command(
     if not echo:
         return
 
-    display_cmd = _display_cmd(cmd)
-    if cwd is not None:
-        display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
-        display_cmd = f"cd {display_cwd} && {display_cmd}"
-
     console = Console(stderr=True)
+    for line in _display_command_lines(
+        cmd,
+        cwd=cwd,
+        extra_env=extra_env,
+        combine_cwd_with_command=True,
+    ):
+        console.print(
+            f"{echo_prefix}{line}",
+            style="dim italic",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
+
+
+def _display_command_lines(
+    cmd: Command,
+    *,
+    cwd: Path | str | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
+    combine_cwd_with_command: bool = False,
+) -> list[str]:
+    lines: list[str] = []
+    display_cmd = _display_cmd(cmd)
+
     if extra_env is not None:
         for key, value in extra_env.items():
-            console.print(
-                f"{echo_prefix}export {key}={shlex.quote(_normalize_env_value(value))}",
-                style="dim italic",
-                markup=False,
-                highlight=False,
-                soft_wrap=True,
-            )
-    console.print(
-        f"{echo_prefix}{display_cmd}",
-        style="dim italic",
-        markup=False,
-        highlight=False,
-        soft_wrap=True,
-    )
+            lines.append(f"export {key}={shlex.quote(_normalize_env_value(value))}")
+
+    if cwd is not None and combine_cwd_with_command:
+        display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
+        display_cmd = f"cd {display_cwd} && {display_cmd}"
+    elif cwd is not None:
+        display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
+        lines.append(f"cd {display_cwd}")
+
+    lines.append(display_cmd)
+    return lines
 
 
 def _display_cmd(cmd: Command) -> str:
@@ -222,7 +239,14 @@ def run_live(
     if message is None:
         message = _display_cmd(cmd)
 
-    _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
+    header_lines = (
+        [
+            f"{echo_prefix}{line}"
+            for line in _display_command_lines(cmd, cwd=cwd, extra_env=extra_env)
+        ]
+        if echo
+        else []
+    )
     process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
@@ -242,7 +266,17 @@ def run_live(
 
     def render() -> Panel:
         log_text = Text()
-        visible_lines = list(recent_lines)[-(max_window_height - 2) :]
+        content_height = max_window_height - 2
+        visible_header_lines = header_lines[:content_height]
+        visible_line_count = max(content_height - len(visible_header_lines), 0)
+        visible_lines = (
+            list(recent_lines)[-visible_line_count:] if visible_line_count else []
+        )
+
+        for line in visible_header_lines:
+            log_text.append(line, style="dim italic")
+            log_text.append("\n")
+
         for stream_name, line in visible_lines:
             style = "red" if stream_name == "stderr" else "default"
             log_text.append(line.rstrip("\n"), style=style)
@@ -328,12 +362,20 @@ async def run_many_live_async(
     if not command_list:
         return []
 
-    for cmd in command_list:
-        _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
-
     parallelism = len(command_list) if max_parallel is None else max_parallel
     semaphore = asyncio.Semaphore(parallelism)
     recent_lines: deque[tuple[int, str, str]] = deque(maxlen=max_lines)
+    header_lines: list[str] = []
+    if echo:
+        if extra_env is not None:
+            for key, value in extra_env.items():
+                header_lines.append(
+                    f"{echo_prefix}export {key}={shlex.quote(_normalize_env_value(value))}"
+                )
+        if cwd is not None:
+            display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
+            header_lines.append(f"{echo_prefix}cd {display_cwd}")
+        header_lines.extend(f"{echo_prefix}{_display_cmd(cmd)}" for cmd in command_list)
     states = [
         _LiveCommandState(
             index=index,
@@ -353,7 +395,17 @@ async def run_many_live_async(
             title = f"{title} | {states[latest_index].display_cmd}"
 
         log_text = Text()
-        visible_lines = list(recent_lines)[-(max_window_height - 2) :]
+        content_height = max_window_height - 2
+        visible_header_lines = header_lines[:content_height]
+        visible_line_count = max(content_height - len(visible_header_lines), 0)
+        visible_lines = (
+            list(recent_lines)[-visible_line_count:] if visible_line_count else []
+        )
+
+        for line in visible_header_lines:
+            log_text.append(line, style="dim italic")
+            log_text.append("\n")
+
         for index, stream_name, line in visible_lines:
             prefix_style = "red dim" if stream_name == "stderr" else "cyan dim"
             line_style = "red" if stream_name == "stderr" else "default"

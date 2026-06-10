@@ -9,13 +9,16 @@ from pathlib import Path
 
 import pytest
 
+import jamsh.subprocess_utils as subprocess_utils
 from jamsh import run
 from jamsh import run_live
 from jamsh import run_many_live
 from jamsh import run_many_live_async
 
 
-def test_run_list_command_captures_and_streams(capsys: pytest.CaptureFixture[str]) -> None:
+def test_run_list_command_captures_and_streams(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     result = run(
         [
             sys.executable,
@@ -95,6 +98,20 @@ def test_run_echo_includes_extra_env_exports_and_cwd(
     assert captured.err.index("export JAMSH_FLAG") < captured.err.index("cd ")
 
 
+def test_display_command_lines_splits_live_header_metadata(tmp_path: Path) -> None:
+    lines = subprocess_utils._display_command_lines(
+        [Path(sys.executable), "-c", "print('ok')"],
+        cwd=tmp_path,
+        extra_env={"JAMSH_FLAG": "hello world"},
+    )
+
+    assert lines == [
+        "export JAMSH_FLAG='hello world'",
+        f"cd {shlex.quote(str(tmp_path))}",
+        shlex.join([sys.executable, "-c", "print('ok')"]),
+    ]
+
+
 def test_run_rejects_env_and_extra_env_together() -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
         run([sys.executable, "-c", "print('x')"], env={}, extra_env={})
@@ -138,6 +155,24 @@ def test_run_live_returns_recent_output_on_success() -> None:
 
     assert result.stdout == "out\n"
     assert result.stderr == "err\n"
+
+
+def test_run_live_echo_header_is_transient_by_default(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    result = run_live(
+        [sys.executable, "-c", "print('ok')"],
+        cwd=tmp_path,
+        extra_env={"JAMSH_FLAG": "transient"},
+    )
+
+    captured = capsys.readouterr()
+    assert result.stdout == "ok\n"
+    assert "JAMSH_FLAG" not in captured.out
+    assert "JAMSH_FLAG" not in captured.err
+    assert str(tmp_path) not in captured.out
+    assert str(tmp_path) not in captured.err
 
 
 def test_run_live_accepts_pathlike_command_args() -> None:
@@ -202,6 +237,24 @@ def test_run_many_live_returns_results_in_input_order() -> None:
 
     assert [result.returncode for result in results] == [0, 0]
     assert [result.stdout for result in results] == ["first\n", "second\n"]
+
+
+def test_run_many_live_echo_header_is_transient_by_default(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    results = run_many_live(
+        [[sys.executable, "-c", "print('ok')"]],
+        cwd=tmp_path,
+        extra_env={"JAMSH_FLAG": "transient"},
+    )
+
+    captured = capsys.readouterr()
+    assert results[0].stdout == "ok\n"
+    assert "JAMSH_FLAG" not in captured.out
+    assert "JAMSH_FLAG" not in captured.err
+    assert str(tmp_path) not in captured.out
+    assert str(tmp_path) not in captured.err
 
 
 def test_run_many_live_accepts_pathlike_command_args() -> None:

@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -102,6 +103,15 @@ def test_run_live_returns_recent_output_on_success() -> None:
     assert result.stderr == "err\n"
 
 
+def test_run_live_accepts_pathlike_command_args() -> None:
+    result = run_live(
+        [Path(sys.executable), "-c", "print('path arg')"],
+        echo=False,
+    )
+
+    assert result.stdout == "path arg\n"
+
+
 def test_run_live_failure_returns_recent_lines_in_exception(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -155,6 +165,15 @@ def test_run_many_live_returns_results_in_input_order() -> None:
 
     assert [result.returncode for result in results] == [0, 0]
     assert [result.stdout for result in results] == ["first\n", "second\n"]
+
+
+def test_run_many_live_accepts_pathlike_command_args() -> None:
+    results = run_many_live(
+        [[Path(sys.executable), "-c", "print('path arg')"]],
+        echo=False,
+    )
+
+    assert results[0].stdout == "path arg\n"
 
 
 def test_run_many_live_failure_raises_first_failed_command(

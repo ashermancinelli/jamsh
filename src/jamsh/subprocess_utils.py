@@ -17,7 +17,8 @@ from rich.panel import Panel
 from rich.text import Text
 
 
-Command = list[str] | str
+CommandArg = str | bytes | os.PathLike[str] | os.PathLike[bytes]
+Command = list[CommandArg] | str
 
 
 @dataclass
@@ -68,7 +69,15 @@ def _echo_command(cmd: Command, echo: bool, echo_prefix: str) -> None:
 
 
 def _display_cmd(cmd: Command) -> str:
-    return shlex.join(cmd) if isinstance(cmd, list) else cmd
+    if isinstance(cmd, list):
+        return shlex.join(os.fsdecode(os.fspath(arg)) for arg in cmd)
+    return cmd
+
+
+def _popen_cmd(cmd: Command) -> list[str | bytes] | str:
+    if isinstance(cmd, list):
+        return [os.fspath(arg) for arg in cmd]
+    return cmd
 
 
 def _dump_completed_output(completed: subprocess.CompletedProcess) -> None:
@@ -104,9 +113,10 @@ def run(
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
     _echo_command(cmd, echo, echo_prefix)
+    process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
-        cmd,
+        process_cmd,
         cwd=cwd,
         env=popen_env,
         shell=isinstance(cmd, str),
@@ -174,9 +184,10 @@ def run_live(
         message = _display_cmd(cmd)
 
     _echo_command(cmd, echo, echo_prefix)
+    process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
-        cmd,
+        process_cmd,
         cwd=cwd,
         env=popen_env,
         shell=isinstance(cmd, str),
@@ -353,8 +364,9 @@ async def run_many_live_async(
                     stderr=asyncio.subprocess.PIPE,
                 )
             else:
+                process_cmd = _popen_cmd(state.cmd)
                 process = await asyncio.create_subprocess_exec(
-                    *state.cmd,
+                    *process_cmd,
                     cwd=cwd,
                     env=popen_env,
                     stdout=asyncio.subprocess.PIPE,

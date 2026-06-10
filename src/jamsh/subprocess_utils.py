@@ -19,6 +19,7 @@ from rich.text import Text
 
 CommandArg = str | bytes | os.PathLike[str] | os.PathLike[bytes]
 Command = list[CommandArg] | str
+EnvValue = str | bytes | os.PathLike[str] | os.PathLike[bytes]
 
 
 @dataclass
@@ -48,16 +49,27 @@ class LiveProcessError(subprocess.CalledProcessError):
 
 
 def _build_env(
-    env: dict[str, str] | None,
-    extra_env: dict[str, str] | None,
+    env: dict[str, EnvValue] | None,
+    extra_env: dict[str, EnvValue] | None,
 ) -> dict[str, str] | None:
     if env is not None and extra_env is not None:
         raise ValueError("env and extra_env are mutually exclusive")
 
     if extra_env is not None:
-        return {**os.environ, **extra_env}
+        return {**os.environ, **_normalize_env(extra_env)}
 
-    return env
+    if env is not None:
+        return _normalize_env(env)
+
+    return None
+
+
+def _normalize_env(env: dict[str, EnvValue]) -> dict[str, str]:
+    return {key: _normalize_env_value(value) for key, value in env.items()}
+
+
+def _normalize_env_value(value: EnvValue) -> str:
+    return os.fsdecode(os.fspath(value))
 
 
 def _echo_command(
@@ -66,7 +78,7 @@ def _echo_command(
     echo_prefix: str,
     *,
     cwd: Path | str | None = None,
-    extra_env: dict[str, str] | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
 ) -> None:
     if not echo:
         return
@@ -80,7 +92,7 @@ def _echo_command(
     if extra_env is not None:
         for key, value in extra_env.items():
             console.print(
-                f"{echo_prefix}export {key}={shlex.quote(value)}",
+                f"{echo_prefix}export {key}={shlex.quote(_normalize_env_value(value))}",
                 style="dim italic",
                 markup=False,
                 highlight=False,
@@ -131,12 +143,12 @@ def run(
     cmd: Command,
     *,
     cwd: Path | str | None = None,
-    env: dict[str, str] | None = None,
-    extra_env: dict[str, str] | None = None,
+    env: dict[str, EnvValue] | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
     capture: bool = False,
     check: bool = True,
     echo: bool = True,
-    echo_prefix: str = "$ ",
+    echo_prefix: str = "",
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
     _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
@@ -198,13 +210,13 @@ def run_live(
     *,
     message: str | None = None,
     cwd: Path | str | None = None,
-    env: dict[str, str] | None = None,
-    extra_env: dict[str, str] | None = None,
+    env: dict[str, EnvValue] | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
     max_window_height: int = 12,
     max_lines: int = 200,
     check: bool = True,
     echo: bool = True,
-    echo_prefix: str = "$ ",
+    echo_prefix: str = "",
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
     if message is None:
@@ -297,14 +309,14 @@ async def run_many_live_async(
     commands: Iterable[Command],
     *,
     cwd: Path | str | None = None,
-    env: dict[str, str] | None = None,
-    extra_env: dict[str, str] | None = None,
+    env: dict[str, EnvValue] | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
     max_parallel: int | None = None,
     max_window_height: int = 12,
     max_lines: int = 200,
     check: bool = True,
     echo: bool = True,
-    echo_prefix: str = "$ ",
+    echo_prefix: str = "",
 ) -> list[subprocess.CompletedProcess]:
     popen_env = _build_env(env, extra_env)
     command_list = list(commands)
@@ -448,14 +460,14 @@ def run_many_live(
     commands: Iterable[Command],
     *,
     cwd: Path | str | None = None,
-    env: dict[str, str] | None = None,
-    extra_env: dict[str, str] | None = None,
+    env: dict[str, EnvValue] | None = None,
+    extra_env: dict[str, EnvValue] | None = None,
     max_parallel: int | None = None,
     max_window_height: int = 12,
     max_lines: int = 200,
     check: bool = True,
     echo: bool = True,
-    echo_prefix: str = "$ ",
+    echo_prefix: str = "",
 ) -> list[subprocess.CompletedProcess]:
     try:
         asyncio.get_running_loop()

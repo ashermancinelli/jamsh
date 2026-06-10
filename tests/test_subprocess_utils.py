@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,24 @@ def test_run_extra_env_preserves_environment() -> None:
     lines = result.stdout.splitlines()
     assert lines[0] == os.environ["PATH"]
     assert lines[1] == "1"
+
+
+def test_run_echo_includes_extra_env_exports_and_cwd(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    run(
+        [sys.executable, "-c", "print('ok')"],
+        capture=True,
+        cwd=tmp_path,
+        extra_env={"JAMSH_FLAG": "hello world"},
+    )
+
+    captured = capsys.readouterr()
+    display_cwd = shlex.quote(str(tmp_path))
+    assert "$ export JAMSH_FLAG='hello world'" in captured.err
+    assert f"$ cd {display_cwd} && " in captured.err
+    assert captured.err.index("export JAMSH_FLAG") < captured.err.index("cd ")
 
 
 def test_run_rejects_env_and_extra_env_together() -> None:

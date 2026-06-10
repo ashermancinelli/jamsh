@@ -60,12 +60,39 @@ def _build_env(
     return env
 
 
-def _echo_command(cmd: Command, echo: bool, echo_prefix: str) -> None:
+def _echo_command(
+    cmd: Command,
+    echo: bool,
+    echo_prefix: str,
+    *,
+    cwd: Path | str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> None:
     if not echo:
         return
 
     display_cmd = _display_cmd(cmd)
-    Console(stderr=True).print(f"{echo_prefix}{display_cmd}", style="dim italic")
+    if cwd is not None:
+        display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
+        display_cmd = f"cd {display_cwd} && {display_cmd}"
+
+    console = Console(stderr=True)
+    if extra_env is not None:
+        for key, value in extra_env.items():
+            console.print(
+                f"{echo_prefix}export {key}={shlex.quote(value)}",
+                style="dim italic",
+                markup=False,
+                highlight=False,
+                soft_wrap=True,
+            )
+    console.print(
+        f"{echo_prefix}{display_cmd}",
+        style="dim italic",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
 
 
 def _display_cmd(cmd: Command) -> str:
@@ -112,7 +139,7 @@ def run(
     echo_prefix: str = "$ ",
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
-    _echo_command(cmd, echo, echo_prefix)
+    _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
     process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
@@ -183,7 +210,7 @@ def run_live(
     if message is None:
         message = _display_cmd(cmd)
 
-    _echo_command(cmd, echo, echo_prefix)
+    _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
     process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
@@ -290,7 +317,7 @@ async def run_many_live_async(
         return []
 
     for cmd in command_list:
-        _echo_command(cmd, echo, echo_prefix)
+        _echo_command(cmd, echo, echo_prefix, cwd=cwd, extra_env=extra_env)
 
     parallelism = len(command_list) if max_parallel is None else max_parallel
     semaphore = asyncio.Semaphore(parallelism)

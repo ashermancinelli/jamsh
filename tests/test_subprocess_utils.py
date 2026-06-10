@@ -31,7 +31,8 @@ def test_run_list_command_captures_and_streams(capsys: pytest.CaptureFixture[str
     assert result.stderr == "err\n"
     assert captured.out == "out\n"
     assert captured.err.endswith("err\n")
-    assert "$ " in captured.err
+    assert "$ " not in captured.err
+    assert sys.executable in captured.err
 
 
 def test_run_string_command_uses_shell(capsys: pytest.CaptureFixture[str]) -> None:
@@ -59,6 +60,21 @@ def test_run_extra_env_preserves_environment() -> None:
     assert lines[1] == "1"
 
 
+def test_run_extra_env_accepts_pathlike_values(tmp_path: Path) -> None:
+    result = run(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['JAMSH_PATH'])",
+        ],
+        capture=True,
+        echo=False,
+        extra_env={"JAMSH_PATH": tmp_path},
+    )
+
+    assert result.stdout == f"{tmp_path}\n"
+
+
 def test_run_echo_includes_extra_env_exports_and_cwd(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -67,13 +83,15 @@ def test_run_echo_includes_extra_env_exports_and_cwd(
         [sys.executable, "-c", "print('ok')"],
         capture=True,
         cwd=tmp_path,
-        extra_env={"JAMSH_FLAG": "hello world"},
+        extra_env={"JAMSH_FLAG": "hello world", "JAMSH_PATH": tmp_path},
     )
 
     captured = capsys.readouterr()
     display_cwd = shlex.quote(str(tmp_path))
-    assert "$ export JAMSH_FLAG='hello world'" in captured.err
-    assert f"$ cd {display_cwd} && " in captured.err
+    assert "export JAMSH_FLAG='hello world'" in captured.err
+    assert f"export JAMSH_PATH={display_cwd}" in captured.err
+    assert f"cd {display_cwd} && " in captured.err
+    assert "$ " not in captured.err
     assert captured.err.index("export JAMSH_FLAG") < captured.err.index("cd ")
 
 

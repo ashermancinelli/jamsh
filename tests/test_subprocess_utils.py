@@ -157,7 +157,7 @@ def test_run_live_returns_recent_output_on_success() -> None:
     assert result.stderr == "err\n"
 
 
-def test_run_live_echo_header_is_transient_by_default(
+def test_run_live_command_title_is_transient_by_default(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
@@ -239,7 +239,7 @@ def test_run_many_live_returns_results_in_input_order() -> None:
     assert [result.stdout for result in results] == ["first\n", "second\n"]
 
 
-def test_run_many_live_echo_header_is_transient_by_default(
+def test_run_many_live_command_title_is_transient_by_default(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:

@@ -236,17 +236,6 @@ def run_live(
     echo_prefix: str = "",
 ) -> subprocess.CompletedProcess:
     popen_env = _build_env(env, extra_env)
-    if message is None:
-        message = _display_cmd(cmd)
-
-    header_lines = (
-        [
-            f"{echo_prefix}{line}"
-            for line in _display_command_lines(cmd, cwd=cwd, extra_env=extra_env)
-        ]
-        if echo
-        else []
-    )
     process_cmd = _popen_cmd(cmd)
 
     process = subprocess.Popen(
@@ -263,22 +252,22 @@ def run_live(
     recent_stdout: deque[str] = deque(maxlen=max_lines)
     recent_stderr: deque[str] = deque(maxlen=max_lines)
     recent_lines: deque[tuple[str, str]] = deque(maxlen=max_lines)
+    if echo:
+        for line in _display_command_lines(cmd, cwd=cwd, extra_env=extra_env):
+            recent_lines.append(("metadata", f"{echo_prefix}{line}"))
 
     def render() -> Panel:
         log_text = Text()
         content_height = max_window_height - 2
-        visible_header_lines = header_lines[:content_height]
-        visible_line_count = max(content_height - len(visible_header_lines), 0)
-        visible_lines = (
-            list(recent_lines)[-visible_line_count:] if visible_line_count else []
-        )
-
-        for line in visible_header_lines:
-            log_text.append(line, style="dim italic")
-            log_text.append("\n")
+        visible_lines = list(recent_lines)[-content_height:]
 
         for stream_name, line in visible_lines:
-            style = "red" if stream_name == "stderr" else "default"
+            if stream_name == "metadata":
+                style = "dim italic"
+            elif stream_name == "stderr":
+                style = "red"
+            else:
+                style = "default"
             log_text.append(line.rstrip("\n"), style=style)
             log_text.append("\n")
 
@@ -364,18 +353,22 @@ async def run_many_live_async(
 
     parallelism = len(command_list) if max_parallel is None else max_parallel
     semaphore = asyncio.Semaphore(parallelism)
-    recent_lines: deque[tuple[int, str, str]] = deque(maxlen=max_lines)
-    header_lines: list[str] = []
+    recent_lines: deque[tuple[int | None, str, str]] = deque(maxlen=max_lines)
     if echo:
         if extra_env is not None:
             for key, value in extra_env.items():
-                header_lines.append(
-                    f"{echo_prefix}export {key}={shlex.quote(_normalize_env_value(value))}"
+                recent_lines.append(
+                    (
+                        None,
+                        "metadata",
+                        f"{echo_prefix}export {key}={shlex.quote(_normalize_env_value(value))}",
+                    )
                 )
         if cwd is not None:
             display_cwd = shlex.quote(os.fsdecode(os.fspath(cwd)))
-            header_lines.append(f"{echo_prefix}cd {display_cwd}")
-        header_lines.extend(f"{echo_prefix}{_display_cmd(cmd)}" for cmd in command_list)
+            recent_lines.append((None, "metadata", f"{echo_prefix}cd {display_cwd}"))
+        for cmd in command_list:
+            recent_lines.append((None, "metadata", f"{echo_prefix}{_display_cmd(cmd)}"))
     states = [
         _LiveCommandState(
             index=index,
@@ -386,30 +379,25 @@ async def run_many_live_async(
         )
         for index, cmd in enumerate(command_list)
     ]
-    latest_index: int | None = None
 
     def render() -> Panel:
         completed_count = sum(state.returncode is not None for state in states)
         title = f"{completed_count}/{len(states)} done"
-        if latest_index is not None:
-            title = f"{title} | {states[latest_index].display_cmd}"
 
         log_text = Text()
         content_height = max_window_height - 2
-        visible_header_lines = header_lines[:content_height]
-        visible_line_count = max(content_height - len(visible_header_lines), 0)
-        visible_lines = (
-            list(recent_lines)[-visible_line_count:] if visible_line_count else []
-        )
-
-        for line in visible_header_lines:
-            log_text.append(line, style="dim italic")
-            log_text.append("\n")
+        visible_lines = list(recent_lines)[-content_height:]
 
         for index, stream_name, line in visible_lines:
+            if stream_name == "metadata":
+                log_text.append(line.rstrip("\n"), style="dim italic")
+                log_text.append("\n")
+                continue
+
             prefix_style = "red dim" if stream_name == "stderr" else "cyan dim"
             line_style = "red" if stream_name == "stderr" else "default"
-            log_text.append(f"[{index + 1}] ", style=prefix_style)
+            if index is not None:
+                log_text.append(f"[{index + 1}] ", style=prefix_style)
             log_text.append(line.rstrip("\n"), style=line_style)
             log_text.append("\n")
 
@@ -426,8 +414,6 @@ async def run_many_live_async(
         stream_name: str,
         live: Live,
     ) -> None:
-        nonlocal latest_index
-
         if stream is None:
             return
 
@@ -436,14 +422,10 @@ async def run_many_live_async(
             line = line_bytes.decode(errors="replace")
             chunks.append(line)
             recent_lines.append((state.index, stream_name, line))
-            latest_index = state.index
             live.update(render())
 
     async def run_command(state: _LiveCommandState, live: Live) -> None:
-        nonlocal latest_index
-
         async with semaphore:
-            latest_index = state.index
             live.update(render())
 
             if isinstance(state.cmd, str):
@@ -473,7 +455,6 @@ async def run_many_live_async(
 
             state.returncode = await process.wait()
             await asyncio.gather(stdout_task, stderr_task)
-            latest_index = state.index
             live.update(render())
 
     with Live(render(), refresh_per_second=10, transient=True) as live:

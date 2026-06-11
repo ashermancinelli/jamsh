@@ -38,12 +38,14 @@ def test_run_list_command_captures_and_streams(
     assert sys.executable in captured.err
 
 
-def test_run_string_command_uses_shell(capsys: pytest.CaptureFixture[str]) -> None:
-    result = run(f'{sys.executable} -c "print(123)"', capture=True)
+def test_run_string_command_uses_shlex_split(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = run(f"{sys.executable} -c \"print('hello there')\"", capture=True)
 
     captured = capsys.readouterr()
-    assert result.stdout == "123\n"
-    assert captured.out == "123\n"
+    assert result.stdout == "hello there\n"
+    assert captured.out == "hello there\n"
 
 
 def test_run_extra_env_preserves_environment() -> None:

@@ -130,10 +130,10 @@ def _display_cmd(cmd: Command) -> str:
     return cmd
 
 
-def _popen_cmd(cmd: Command) -> list[str | bytes] | str:
+def _popen_cmd(cmd: Command) -> list[str | bytes]:
     if isinstance(cmd, list):
         return [os.fspath(arg) for arg in cmd]
-    return cmd
+    return shlex.split(cmd)
 
 
 def _dump_completed_output(completed: subprocess.CompletedProcess) -> None:
@@ -175,7 +175,6 @@ def run(
         process_cmd,
         cwd=cwd,
         env=popen_env,
-        shell=isinstance(cmd, str),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -243,7 +242,6 @@ def run_live(
         process_cmd,
         cwd=cwd,
         env=popen_env,
-        shell=isinstance(cmd, str),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -409,23 +407,14 @@ async def run_many_live_async(
             latest_index = state.index
             live.update(render())
 
-            if isinstance(state.cmd, str):
-                process = await asyncio.create_subprocess_shell(
-                    state.cmd,
-                    cwd=cwd,
-                    env=popen_env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-            else:
-                process_cmd = _popen_cmd(state.cmd)
-                process = await asyncio.create_subprocess_exec(
-                    *process_cmd,
-                    cwd=cwd,
-                    env=popen_env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+            process_cmd = _popen_cmd(state.cmd)
+            process = await asyncio.create_subprocess_exec(
+                *process_cmd,
+                cwd=cwd,
+                env=popen_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
             stdout_task = asyncio.create_task(
                 read_stream(state, process.stdout, "stdout", live)
